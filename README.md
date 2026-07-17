@@ -47,16 +47,18 @@ Windows, macOS, and Linux builds are also produced by GitHub Actions
 
 ## Keybindings (main screen)
 
-| Key   | Action                        |
+| Key   | Action                         |
 |-------|--------------------------------|
-| n     | Create a new instance          |
-| enter | Launch the selected instance   |
-| d     | Delete the selected instance   |
-| r     | Rename the selected instance   |
+| n     | Create instance                |
+| enter | Launch instance                |
+| d     | Delete instance                |
+| r     | Rename instance                |
+| x     | Browse instance files          |
 | a     | Manage accounts                |
 | p     | Browse & install Modrinth packs|
-| s     | Settings                       |
-| q     | Quit                           |
+| s     | Instance Settings              |
+| g     | Launcher Settings              |
+| ctrl + q| Quit                         |
 
 Every screen shows its own keybindings at the bottom; `esc` goes back.
 
