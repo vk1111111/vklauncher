@@ -45,6 +45,6 @@ Every screen shows its own keybindings at the bottom; `esc` goes back.
 ## Known limitations
 
 - No support for Forge/NeoForge
-- No built-in Java installer — you need a JDK already on your system.
+- No built-in Java installer you need JDK already on your system.
 - Resource/texture pack and shader browsing from Modrinth isn't built in
   (only modpacks)
