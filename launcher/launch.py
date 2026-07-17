@@ -143,7 +143,6 @@ def build_command(
     if args_block:
         jvm_args = _flatten_args(args_block.get("jvm", []), subs)
         cmd.extend(jvm_args)
-        # Loader profiles sometimes omit -cp; never launch without a classpath.
         if "-cp" not in jvm_args and "-classpath" not in jvm_args:
             cmd.extend(["-cp", classpath_str])
     else:
