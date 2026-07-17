@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,22 @@ def _default_app_dir() -> Path:
     return Path(base) / "vklauncher"
 
 
-PACKAGE_DIR = Path(__file__).resolve().parent
+def _package_dir() -> Path:
+    """Directory containing packaged data (JSON defaults).
+
+    PyInstaller onefile extracts to sys._MEIPASS; datas are placed under
+    ``launcher/`` there. In a normal install, files live next to this module.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "launcher"
+        if bundled.is_dir():
+            return bundled
+        return Path(meipass)
+    return Path(__file__).resolve().parent
+
+
+PACKAGE_DIR = _package_dir()
 DEFAULT_SETTINGS_FILE = PACKAGE_DIR / "default_settings.json"
 DEFAULT_INSTANCE_SETTINGS_FILE = PACKAGE_DIR / "default_instance_settings.json"
 

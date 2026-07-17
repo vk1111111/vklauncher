@@ -27,6 +27,24 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
+## Standalone binaries
+
+Build a one-file binary for your current OS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt pyinstaller
+python3 build_binary.py
+```
+
+The binary and a zip land in `dist/` (for example
+`dist/vklauncher-linux-x86_64/vklauncher`).
+
+Windows, macOS, and Linux builds are also produced by GitHub Actions
+(`.github/workflows/build-binaries.yml`) on version tags (`v*`) or via
+**Actions → Build binaries → Run workflow**.
+
 ## Keybindings (main screen)
 
 | Key   | Action                        |
