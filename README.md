@@ -43,7 +43,7 @@ irm https://raw.githubusercontent.com/vk1111111/vklauncher/main/uninstall.ps1 | 
 - A Java runtime installed (the launcher tries to auto-detect it via
   `JAVA_HOME` / `PATH`; you can also set an explicit path in Settings).
   Modern Minecraft (1.20.5+) needs Java 21, 1.17–1.20.4 needs Java 17,
-  older versions need Java 8 — install whichever your target version needs.
+  older versions need Java 8, install whichever your target version needs.
 - For development from source: Python 3.10+
 
 ## Run from source
@@ -84,6 +84,6 @@ Every screen shows its own keybindings at the bottom; `esc` goes back.
 ## Known limitations
 
 - No support for Forge/NeoForge
-- No built-in Java installer — you need a JDK already on your system.
+- No built-in Java installer, you need a JDK already on your system.
 - Resource/texture pack and shader browsing from Modrinth isn't built in
   (only modpacks)
