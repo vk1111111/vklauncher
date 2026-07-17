@@ -53,6 +53,39 @@ def _legacy_minecraft_arguments(minecraft_arguments: str, subs: dict[str, str]) 
     return [_substitute(tok, subs) for tok in minecraft_arguments.split(" ") if tok]
 
 
+def _client_jar_path(instance: Instance, version_json: dict) -> Path:
+    version_id = version_json["id"]
+    jar_id = (
+        version_json.get("jar")
+        or version_json.get("_inheritsFrom")
+        or instance.mc_version
+        or version_id
+    )
+    candidates = [
+        config.VERSIONS_DIR / version_id / f"{version_id}.jar",
+        config.VERSIONS_DIR / jar_id / f"{jar_id}.jar",
+        config.VERSIONS_DIR / instance.mc_version / f"{instance.mc_version}.jar",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[-1]
+
+
+def _natives_dir(instance: Instance, version_json: dict) -> Path:
+    version_id = version_json["id"]
+    candidates = [config.NATIVES_DIR / version_id]
+    inherits = version_json.get("_inheritsFrom")
+    if inherits:
+        candidates.append(config.NATIVES_DIR / inherits)
+    if instance.mc_version:
+        candidates.append(config.NATIVES_DIR / instance.mc_version)
+    for path in candidates:
+        if path.exists() and any(path.iterdir()):
+            return path
+    return candidates[0]
+
+
 def build_command(
     instance: Instance,
     version_json: dict,
@@ -60,7 +93,7 @@ def build_command(
     settings: dict,
 ) -> list[str]:
     version_id = version_json["id"]
-    natives_dir = config.NATIVES_DIR / version_id
+    natives_dir = _natives_dir(instance, version_json)
     classpath_jars = versions.collect_libraries(version_json)
     classpath = []
     for lib in classpath_jars:
@@ -68,22 +101,23 @@ def build_command(
         if resolved:
             classpath.append(str(resolved[1]))
 
-    client_jar = config.VERSIONS_DIR / version_json.get("inheritsFrom", version_id)
-    if version_json.get("downloads", {}).get("client"):
-        client_jar_path = config.VERSIONS_DIR / version_id / f"{version_id}.jar"
-        if not client_jar_path.exists():
-            client_jar_path = config.VERSIONS_DIR / instance.mc_version / f"{instance.mc_version}.jar"
-    else:
-        client_jar_path = config.VERSIONS_DIR / instance.mc_version / f"{instance.mc_version}.jar"
-    classpath.append(str(client_jar_path))
+    classpath.append(str(_client_jar_path(instance, version_json)))
 
     classpath_sep = ";" if config.is_windows() else ":"
     classpath_str = classpath_sep.join(classpath)
 
     asset_index_id = version_json.get("assets") or version_json.get("assetIndex", {}).get("id", "legacy")
 
-    min_ram = instance.min_ram_mb or settings.get("min_ram_mb", 1024)
-    max_ram = instance.max_ram_mb or settings.get("max_ram_mb", 4096)
+    min_ram = (
+        instance.min_ram_mb
+        if instance.min_ram_mb is not None
+        else settings.get("min_ram_mb", 1024)
+    )
+    max_ram = (
+        instance.max_ram_mb
+        if instance.max_ram_mb is not None
+        else settings.get("max_ram_mb", 4096)
+    )
 
     subs = {
         "auth_player_name": account.username,
@@ -110,7 +144,11 @@ def build_command(
 
     args_block = version_json.get("arguments")
     if args_block:
-        cmd.extend(_flatten_args(args_block.get("jvm", []), subs))
+        jvm_args = _flatten_args(args_block.get("jvm", []), subs)
+        cmd.extend(jvm_args)
+        # Loader profiles sometimes omit -cp; never launch without a classpath.
+        if "-cp" not in jvm_args and "-classpath" not in jvm_args:
+            cmd.extend(["-cp", classpath_str])
     else:
         cmd.append(f"-Djava.library.path={natives_dir}")
         cmd.append("-cp")
@@ -123,13 +161,10 @@ def build_command(
     if extra:
         cmd.extend(extra.split())
 
-    if not args_block:
-        cmd.append(version_json.get("mainClass", "net.minecraft.client.main.Main"))
-    else:
-        cmd.append(version_json.get("mainClass", "net.minecraft.client.main.Main"))
+    cmd.append(version_json.get("mainClass", "net.minecraft.client.main.Main"))
+    if args_block:
         cmd.extend(_flatten_args(args_block.get("game", []), subs))
-
-    if "minecraftArguments" in version_json and not args_block:
+    elif "minecraftArguments" in version_json:
         cmd.extend(_legacy_minecraft_arguments(version_json["minecraftArguments"], subs))
 
     return cmd
@@ -141,7 +176,7 @@ def launch(
     settings: dict,
     on_output: Optional[OutputCB] = None,
 ) -> subprocess.Popen:
-    version_json = versions.get_version_json(instance.version_profile_id)
+    version_json = versions.resolve_version_json(instance.version_profile_id)
     cmd = build_command(instance, version_json, account, settings)
 
     instance.minecraft_dir.mkdir(parents=True, exist_ok=True)

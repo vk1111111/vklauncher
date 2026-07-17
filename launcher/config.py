@@ -40,7 +40,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "max_ram_mb": 4096,
     "java_path": "",
     "extra_jvm_args": "",
-    # oauth override
+    # oauth
     "ms_client_id": "",
     "window_width": 925,
     "window_height": 530,

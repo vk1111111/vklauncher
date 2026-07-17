@@ -30,6 +30,10 @@ from textual.binding import Binding
 from . import config, versions, instances, auth, modrinth
 from . import launch as launch_mod
 
+def safe_markup(text: str) -> str:
+    return text.replace("[", r"\[")
+
+
 APP_CSS = """
 Screen {
     background: $surface;
@@ -112,8 +116,8 @@ class MessageModal(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="msg-box"):
             style = "bold red" if self._is_error else "bold green"
-            yield Static(f"[{style}]{self._title}[/]")
-            yield Static(self._message)
+            yield Static(f"[{style}]{safe_markup(self._title)}[/]")
+            yield Static(safe_markup(self._message))
             yield Button("OK", id="ok", variant="primary")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -173,20 +177,11 @@ class DeviceCodeModal(ModalScreen[None]):
             payload = auth.start_device_code(self.client_id)
             url = payload.get("verification_uri", "https://microsoft.com/link")
             code = payload.get("user_code", "?")
-            opened = auth.open_device_code_browser(payload)
-            if opened:
-                msg = (
-                    f"A browser window should have opened for Microsoft sign-in.\n"
-                    f"If it didn't, open [bold]{url}[/] and enter:\n"
-                    f"[bold yellow]{code}[/]\n\n"
-                    f"Waiting for you to finish signing in..."
-                )
-            else:
-                msg = (
-                    f"1. Open: [bold]{url}[/]\n"
-                    f"2. Enter code: [bold yellow]{code}[/]\n\n"
-                    f"Waiting for you to finish signing in..."
-                )
+            msg = (
+                f"1. Open: [bold]{url}[/]\n"
+                f"2. Enter code: [bold yellow]{code}[/]\n\n"
+                f"Waiting for you to finish signing in..."
+            )
             self.app.call_from_thread(self._set_status, msg)
 
             interval = payload.get("interval", 5)
@@ -198,9 +193,9 @@ class DeviceCodeModal(ModalScreen[None]):
             auth.save_account(account, make_active=True)
             self.result_account = account
             self.app.call_from_thread(self.dismiss, None)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  
             self.error = str(e)
-            self.app.call_from_thread(self._set_status, f"[red]Error: {e}[/]")
+            self.app.call_from_thread(self._set_status, f"[red]Error: {safe_markup(str(e))}[/]")
 
     def _set_status(self, text: str) -> None:
         self.query_one("#device-status", Static).update(text)
@@ -239,7 +234,7 @@ class AccountsScreen(Screen):
         active = data.get("active", "")
         for acc in auth.list_accounts():
             marker = "[green]● active[/]" if acc.username == active else ""
-            label = f"{acc.username}  [{acc.kind}]  {marker}"
+            label = f"{safe_markup(acc.username)}  ({acc.kind})  {marker}"
             lv.append(ListItem(Label(label), name=acc.username))
 
     def action_add_offline(self) -> None:
@@ -294,18 +289,18 @@ class SettingsScreen(Screen):
         yield Header()
         yield Static("Settings", id="title-bar")
         with VerticalScroll(classes="panel"):
-            yield Label("Min RAM (MB)")
+            yield Label("Default min RAM (MB)")
             yield Input(value=str(s["min_ram_mb"]), id="min_ram")
-            yield Label("Max RAM (MB)")
+            yield Label("Default max RAM (MB)")
             yield Input(value=str(s["max_ram_mb"]), id="max_ram")
-            yield Label("Java path (blank = auto-detect)")
+            yield Label("Java path (leave blank to automatically detect a path")
             yield Input(value=s["java_path"], id="java_path")
             yield Label("Extra JVM args")
             yield Input(value=s["extra_jvm_args"], id="extra_jvm_args")
             yield Label("Microsoft OAuth client id override (blank = built-in)")
             yield Input(value=s["ms_client_id"], id="ms_client_id")
             yield Button("Save (ctrl+s)", id="save", variant="primary")
-        yield Static("[ctrl+s] save   [esc] back without saving", id="status-bar")
+        yield Static("[ctrl+s] Save   [esc] Exit without saving", id="status-bar")
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -325,6 +320,74 @@ class SettingsScreen(Screen):
         s["ms_client_id"] = self.query_one("#ms_client_id", Input).value.strip()
         config.save_settings(s)
         self.app.pop_screen()
+
+
+class InstanceSettingsModal(ModalScreen[bool]):
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def __init__(self, inst: instances.Instance):
+        super().__init__()
+        self.inst = inst
+
+    def compose(self) -> ComposeResult:
+        settings = config.load_settings()
+        default_min = settings.get("min_ram_mb", 1024)
+        default_max = settings.get("max_ram_mb", 4096)
+        min_val = "" if self.inst.min_ram_mb is None else str(self.inst.min_ram_mb)
+        max_val = "" if self.inst.max_ram_mb is None else str(self.inst.max_ram_mb)
+        with Vertical(classes="panel", id="instance-settings-box"):
+            yield Static(f"[bold]Instance settings - {safe_markup(self.inst.name)}[/]")
+            yield Label(f"Min RAM (MB) - leave blank to use default ({default_min})")
+            yield Input(value=min_val, placeholder=str(default_min), id="inst_min_ram")
+            yield Label(f"Max RAM (MB) - leave blank to use default ({default_max})")
+            yield Input(value=max_val, placeholder=str(default_max), id="inst_max_ram")
+            with Horizontal():
+                yield Button("Save", id="save", variant="primary")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self._save()
+        else:
+            self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def _parse_ram(self, raw: str) -> Optional[int]:
+        raw = raw.strip()
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+        except ValueError as e:
+            raise ValueError("RAM values must be whole numbers in MB.") from e
+        if value < 256:
+            raise ValueError("RAM must be at least 256 MB.")
+        return value
+
+    def _save(self) -> None:
+        try:
+            min_ram = self._parse_ram(self.query_one("#inst_min_ram", Input).value)
+            max_ram = self._parse_ram(self.query_one("#inst_max_ram", Input).value)
+        except ValueError as e:
+            self.app.push_screen(MessageModal("Error", str(e), is_error=True))
+            return
+
+        settings = config.load_settings()
+        effective_min = min_ram if min_ram is not None else settings.get("min_ram_mb", 1024)
+        effective_max = max_ram if max_ram is not None else settings.get("max_ram_mb", 4096)
+        if effective_min > effective_max:
+            self.app.push_screen(
+                MessageModal("Error", "Min RAM cannot be greater than max RAM.", is_error=True)
+            )
+            return
+
+        self.inst.min_ram_mb = min_ram
+        self.inst.max_ram_mb = max_ram
+        instances.save_instance(self.inst)
+        self.dismiss(True)
+
 
 class NewInstanceScreen(Screen):
     BINDINGS = [Binding("escape", "app.pop_screen", "Back")]
@@ -362,7 +425,7 @@ class NewInstanceScreen(Screen):
         try:
             entries, latest = versions.fetch_version_manifest()
         except Exception as e:
-            self.app.call_from_thread(self._set_status, f"[red]Failed to load versions: {e}[/]")
+            self.app.call_from_thread(self._set_status, f"[red]Failed to load versions: {safe_markup(str(e))}[/]")
             return
         self._all_entries = entries
         self.app.call_from_thread(self._populate, "release")
@@ -404,10 +467,10 @@ class NewInstanceScreen(Screen):
             loader = "quilt"
 
         if not name:
-            self.app.push_screen(MessageModal("Error", "Please enter an instance name.", is_error=True))
+            self.app.push_screen(MessageModal("Error", "Missing instance name.", is_error=True))
             return
         if not mc_version or mc_version == Select.BLANK:
-            self.app.push_screen(MessageModal("Error", "Please choose a Minecraft version.", is_error=True))
+            self.app.push_screen(MessageModal("Error", "Minecraft version missing.", is_error=True))
             return
 
         self._create_instance(name, mc_version, loader)
@@ -438,12 +501,12 @@ class NewInstanceScreen(Screen):
                 version_profile_id=vjson["id"],
             )
             self.app.call_from_thread(self._on_success, modal, inst.name)
-        except Exception as e:
+        except Exception as e: 
             self.app.call_from_thread(self._on_failure, modal, str(e))
 
     def _on_success(self, modal: ProgressModal, name: str) -> None:
         self.app.pop_screen()
-        self.app.pop_screen() 
+        self.app.pop_screen()
         self.app.push_screen(MessageModal("Success", f"Instance '{name}' is ready to launch."))
         main_screen = self.app.get_screen("main")
         if hasattr(main_screen, "refresh_list"):
@@ -453,7 +516,6 @@ class NewInstanceScreen(Screen):
         self.app.pop_screen()
         self.app.push_screen(MessageModal("Failed to create instance", error, is_error=True))
 
-# modrinth experimental
 class PickPackVersionModal(ModalScreen[Optional[modrinth.PackVersion]]):
     def __init__(self, pack: modrinth.ModpackHit, pack_versions: list[modrinth.PackVersion]):
         super().__init__()
@@ -462,9 +524,9 @@ class PickPackVersionModal(ModalScreen[Optional[modrinth.PackVersion]]):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="pick-version-box"):
-            yield Static(f"[bold]{self.pack.title}[/] — choose a version")
+            yield Static(f"[bold]{safe_markup(self.pack.title)}[/] - choose a version")
             options = [
-                (f"{v.name}  ({', '.join(v.game_versions[:1])}, {', '.join(v.loaders)})", v.id)
+                (f"{safe_markup(v.name)}  ({', '.join(v.game_versions[:1])}, {', '.join(v.loaders)})", v.id)
                 for v in self.pack_versions
             ]
             yield Select(options, id="pv_select", allow_blank=False)
@@ -503,7 +565,7 @@ class ModrinthScreen(Screen):
         yield Input(placeholder="Search modpacks (press enter)...", id="search")
         yield ListView(id="results")
         yield Static(
-            "[/] search   [enter] Install selected pack   [esc] Back",
+            "[bold]/[/bold] search   [enter] install selected pack   [esc] back",
             id="status-bar",
         )
         yield Footer()
@@ -511,6 +573,9 @@ class ModrinthScreen(Screen):
     def on_screen_resume(self) -> None:
         self._results: list[modrinth.ModpackHit] = []
         self.query_one("#search", Input).focus()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self._install_slug(event.item.name)
 
     def action_focus_search(self) -> None:
         self.query_one("#search", Input).focus()
@@ -531,18 +596,34 @@ class ModrinthScreen(Screen):
         self._results = hits
         self.app.call_from_thread(self._populate_results, hits)
 
-    def _populate_results(self, hits: list[modrinth.ModpackHit]) -> None:
+    @work
+    async def _populate_results(self, hits: list[modrinth.ModpackHit]) -> None:
         lv = self.query_one("#results", ListView)
-        lv.clear()
-        for h in hits:
-            label = f"{h.title}  by {h.author}   ↓{h.downloads:,}\n  {h.description[:90]}"
-            lv.append(ListItem(Label(label), name=h.slug))
+        await lv.clear()
+        items = [
+            ListItem(
+                Label(
+                    f"{safe_markup(h.title)}  by {safe_markup(h.author)}   ↓{h.downloads:,}\n"
+                    f"  {safe_markup(h.description[:90])}"
+                ),
+                name=h.slug,
+            )
+            for h in hits
+        ]
+        if items:
+            await lv.extend(items)
+            lv.index = 0
+            lv.focus()
 
     def action_install_selected(self) -> None:
         lv = self.query_one("#results", ListView)
         if lv.highlighted_child is None:
             return
-        slug = lv.highlighted_child.name
+        self._install_slug(lv.highlighted_child.name)
+
+    def _install_slug(self, slug: Optional[str]) -> None:
+        if not slug:
+            return
         pack = next((h for h in self._results if h.slug == slug), None)
         if not pack:
             return
@@ -552,14 +633,14 @@ class ModrinthScreen(Screen):
     def _fetch_versions_then_pick(self, pack: modrinth.ModpackHit) -> None:
         try:
             pvs = modrinth.get_project_versions(pack.project_id or pack.slug)
-        except Exception as e:
+        except Exception as e: 
             self.app.call_from_thread(
                 self.app.push_screen, MessageModal("Error", str(e), is_error=True)
             )
             return
         if not pvs:
             self.app.call_from_thread(
-                self.app.push_screen, MessageModal("Error", "No versions found.", is_error=True)
+                self.app.push_screen, MessageModal("Error", "No versions found for this pack.", is_error=True)
             )
             return
 
@@ -586,7 +667,7 @@ class ModrinthScreen(Screen):
         try:
             inst = modrinth.install_modpack(pack_version, name, progress=progress)
             self.app.call_from_thread(self._on_success, modal, inst.name)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  
             self.app.call_from_thread(self._on_failure, modal, str(e))
 
     def _on_success(self, modal: ProgressModal, name: str) -> None:
@@ -601,7 +682,7 @@ class ModrinthScreen(Screen):
         self.app.push_screen(MessageModal("Install failed", error, is_error=True))
 
 class ConsoleScreen(Screen):
-    BINDINGS = [Binding("escape", "close", "Close logs")]
+    BINDINGS = [Binding("escape", "close", "Close (game keeps running)")]
 
     def __init__(self, instance_name: str, proc: subprocess.Popen):
         super().__init__()
@@ -612,7 +693,7 @@ class ConsoleScreen(Screen):
         yield Header()
         yield Static(f"Running: {self.instance_name}", id="title-bar")
         yield Log(id="console-log", max_lines=5000)
-        yield Static("[esc] Close logs", id="status-bar")
+        yield Static("[esc] close this view (game keeps running in the background)", id="status-bar")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -628,9 +709,9 @@ class ConsoleScreen(Screen):
 
         try:
             launch_mod.stream_output(self.proc, emit)
-        except Exception as e:  # noqa: BLE001
-            emit(f"[VKL] output stream ended: {e}")
-        emit(f"[VKL] process exited with code {self.proc.poll()}")
+        except Exception as e:  
+            emit(f"[launcher] output stream ended: {e}")
+        emit(f"[launcher] process exited with code {self.proc.poll()}")
 
     def action_close(self) -> None:
         self.app.pop_screen()
@@ -638,12 +719,14 @@ class ConsoleScreen(Screen):
 class MainScreen(Screen):
     BINDINGS = [
         Binding("n", "new_instance", "New"),
-        Binding("enter", "launch_instance", "Launch"),
+        Binding("enter", "launch_instance", "Launch", show=False),
+        Binding("x", "browse_files", "Browse files"),
         Binding("d", "delete_instance", "Delete"),
         Binding("r", "rename_instance", "Rename"),
         Binding("a", "accounts", "Accounts"),
-        Binding("p", "modrinth", "Modrinth"),
-        Binding("s", "settings", "Settings"),
+        Binding("p", "modrinth", "Search Modrinth packs"),
+        Binding("s", "instance_settings", "Instance settings"),
+        Binding("g", "settings", "Launcher settings"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -658,16 +741,13 @@ class MainScreen(Screen):
                 yield Label("Active account")
                 yield Static("(none)", id="active-account")
                 yield Label("")
-                yield Static(
-                    "[n] New instance\n"
-                    "[enter] Launch\n"
-                    "[d] Delete\n"
-                    "[r] Rename\n"
-                    "[a] Accounts\n"
-                    "[p] Browse Modrinth packs\n"
-                    "[s] Settings\n"
-                    "[q] Quit",
-                )
+                yield Static("Instance Type: -", id="detail-type")
+                yield Static("Source: -", id="detail-source")
+                yield Static("Minimum memory allocated: -", id="detail-min-ram")
+                yield Static("Maximum memory allocated: -", id="detail-max-ram")
+                yield Static("JDK: -", id="detail-jdk")
+                yield Static("Version: -", id="detail-version")
+                
         yield Static("", id="status-bar")
         yield Footer()
 
@@ -676,6 +756,12 @@ class MainScreen(Screen):
         table.add_columns("Name", "Version", "Loader", "Last played")
         table.cursor_type = "row"
         self.refresh_list()
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        self.action_launch_instance()
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._refresh_instance_details()
 
     def on_screen_resume(self) -> None:
         self.refresh_list()
@@ -688,8 +774,51 @@ class MainScreen(Screen):
             table.add_row(inst.name, inst.mc_version, inst.loader, fmt_ts(inst.last_played), key=inst.name)
 
         acc = auth.get_active_account()
-        label = f"{acc.username} ({acc.kind})" if acc else "(none — press [a] to add one)"
+        label = f"{safe_markup(acc.username)} ({acc.kind})" if acc else "(none - press [a] to add one)"
         self.query_one("#active-account", Static).update(label)
+        self._refresh_instance_details()
+
+    def _refresh_instance_details(self) -> None:
+        inst = self._selected_instance()
+        settings = config.load_settings()
+        if not inst:
+            self.query_one("#detail-type", Static).update("Instance Type: -")
+            self.query_one("#detail-source", Static).update("Source: -")
+            self.query_one("#detail-min-ram", Static).update("Minimum memory allocated: -")
+            self.query_one("#detail-max-ram", Static).update("Maximum memory allocated: -")
+            self.query_one("#detail-jdk", Static).update("JDK: -")
+            self.query_one("#detail-version", Static).update("Version: -")
+            return
+
+        loader = inst.loader or "vanilla"
+        if inst.loader_version:
+            inst_type = f"{loader} {inst.loader_version}"
+        else:
+            inst_type = loader
+
+        if inst.modpack_source.startswith("modrinth:"):
+            source = f"Modrinth ({inst.modpack_source.split(':', 1)[1]})"
+        elif inst.modpack_source:
+            source = inst.modpack_source
+        else:
+            source = "local"
+
+        min_ram = inst.min_ram_mb if inst.min_ram_mb is not None else settings.get("min_ram_mb", 1024)
+        max_ram = inst.max_ram_mb if inst.max_ram_mb is not None else settings.get("max_ram_mb", 4096)
+        jdk = inst.java_path or config.find_java() or "auto"
+        min_note = "" if inst.min_ram_mb is not None else " (default)"
+        max_note = "" if inst.max_ram_mb is not None else " (default)"
+
+        self.query_one("#detail-type", Static).update(f"Instance Type: {safe_markup(inst_type)}")
+        self.query_one("#detail-source", Static).update(f"Source: {safe_markup(source)}")
+        self.query_one("#detail-min-ram", Static).update(
+            f"Minimum memory allocated: {min_ram} MB{min_note}"
+        )
+        self.query_one("#detail-max-ram", Static).update(
+            f"Maximum memory allocated: {max_ram} MB{max_note}"
+        )
+        self.query_one("#detail-jdk", Static).update(f"JDK: {safe_markup(jdk)}")
+        self.query_one("#detail-version", Static).update(f"Version: {safe_markup(inst.mc_version)}")
 
     def _selected_instance(self) -> Optional[instances.Instance]:
         table = self.query_one("#instance-table", DataTable)
@@ -707,6 +836,20 @@ class MainScreen(Screen):
 
     def action_modrinth(self) -> None:
         self.app.push_screen(ModrinthScreen())
+
+    def action_instance_settings(self) -> None:
+        inst = self._selected_instance()
+        if not inst:
+            self.app.push_screen(
+                MessageModal("No instance", "Select an instance first.", is_error=True)
+            )
+            return
+
+        def cb(saved: bool) -> None:
+            if saved:
+                self._refresh_instance_details()
+
+        self.app.push_screen(InstanceSettingsModal(inst), cb)
 
     def action_settings(self) -> None:
         self.app.push_screen(SettingsScreen())
@@ -753,13 +896,10 @@ class MainScreen(Screen):
 
         self.app.push_screen(RenameModal(), cb)
 
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        self.action_launch_instance()
-
     def action_launch_instance(self) -> None:
         inst = self._selected_instance()
         if not inst:
-            self.app.push_screen(MessageModal("No instance", "Select Minecraft instance first.", is_error=True))
+            self.app.push_screen(MessageModal("No instance", "Select an instance first.", is_error=True))
             return
         account = auth.get_active_account()
         if not account:
@@ -774,11 +914,11 @@ class MainScreen(Screen):
         settings = config.load_settings()
         try:
             if account.kind == "microsoft":
-                account = auth.ensure_fresh(account)
+                account = auth.ensure_fresh(account, auth.resolve_ms_client_id(settings))
             proc = launch_mod.launch(inst, account, settings)
             instances.touch_last_played(inst.name)
             self.app.call_from_thread(self._open_console, inst.name, proc)
-        except Exception as e:
+        except Exception as e:  
             tb = traceback.format_exc()
             self.app.call_from_thread(
                 self.app.push_screen, MessageModal("Launch failed", f"{e}\n\n{tb[-600:]}", is_error=True)

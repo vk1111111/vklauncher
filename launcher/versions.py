@@ -94,6 +94,56 @@ def get_version_json(version_id: str, version_url: str | None = None) -> dict:
         return json.load(f)
 
 
+def resolve_version_json(version_id: str, version_url: str | None = None) -> dict:
+    """Load a version profile, recursively merging any inheritsFrom parent.
+
+    Fabric/Quilt profiles only ship loader libraries and a couple of JVM args;
+    the vanilla parent supplies -cp, natives paths, game args, and client libs.
+    """
+    return _merge_inherited(get_version_json(version_id, version_url))
+
+
+def _merge_inherited(vjson: dict) -> dict:
+    inherits = vjson.get("inheritsFrom")
+    if not inherits:
+        return dict(vjson)
+
+    parent = _merge_inherited(get_version_json(inherits))
+    merged = dict(parent)
+
+    for key in (
+        "id",
+        "mainClass",
+        "type",
+        "time",
+        "releaseTime",
+        "minecraftArguments",
+        "jar",
+        "complianceLevel",
+    ):
+        if key in vjson:
+            merged[key] = vjson[key]
+
+    # Child libraries first so loader jars take precedence over duplicates.
+    merged["libraries"] = list(vjson.get("libraries", [])) + list(parent.get("libraries", []))
+
+    parent_args = parent.get("arguments") or {}
+    child_args = vjson.get("arguments") or {}
+    if parent_args or child_args:
+        merged["arguments"] = {
+            "jvm": list(parent_args.get("jvm", [])) + list(child_args.get("jvm", [])),
+            "game": list(parent_args.get("game", [])) + list(child_args.get("game", [])),
+        }
+
+    for key in ("assetIndex", "assets", "downloads"):
+        if key in vjson:
+            merged[key] = vjson[key]
+
+    merged["_inheritsFrom"] = inherits
+    merged.pop("inheritsFrom", None)
+    return merged
+
+
 def _rule_applies(rule: dict, features: dict[str, bool] | None = None) -> bool:
     features = features or {}
 
@@ -344,8 +394,8 @@ def install_fabric(
     vjson.setdefault("assets", vanilla.get("assets"))
     natives_dest = config.NATIVES_DIR / profile_id
     download_libraries_and_natives(vjson, natives_dest, progress)
-    vanilla_natives_dest = config.NATIVES_DIR / mc_version
-    download_libraries_and_natives(vanilla, vanilla_natives_dest, progress)
+    # Vanilla natives must live alongside the profile — launch uses this dir.
+    download_libraries_and_natives(vanilla, natives_dest, progress)
     return vjson
 
 
@@ -382,6 +432,5 @@ def install_quilt(
     vjson.setdefault("assets", vanilla.get("assets"))
     natives_dest = config.NATIVES_DIR / profile_id
     download_libraries_and_natives(vjson, natives_dest, progress)
-    vanilla_natives_dest = config.NATIVES_DIR / mc_version
-    download_libraries_and_natives(vanilla, vanilla_natives_dest, progress)
+    download_libraries_and_natives(vanilla, natives_dest, progress)
     return vjson
