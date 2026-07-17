@@ -27,8 +27,6 @@ curl -fsSL https://raw.githubusercontent.com/vk1111111/vklauncher/main/install.s
 irm https://raw.githubusercontent.com/vk1111111/vklauncher/main/install.ps1 | iex
 ```
 
-Pin a release with `VKLAUNCHER_VERSION=v0.1.0` (or `$env:VKLAUNCHER_VERSION` on Windows).
-
 Uninstall:
 
 ```bash
