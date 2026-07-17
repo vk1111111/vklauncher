@@ -4,6 +4,7 @@ import concurrent.futures
 import hashlib
 import json
 import platform
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,30 @@ from typing import Callable, Iterable
 import requests
 
 from . import config
+
+
+def _loader_version_key(version: str) -> tuple:
+    """Sort key for loader versions like 0.29.2 / 0.30.0-beta.8 (ascending)."""
+    main, _, pre = version.partition("-")
+    nums = tuple(int(p) if p.isdigit() else 0 for p in main.split("."))
+    if not pre:
+        # Releases sort after pre-releases of the same numeric base.
+        return (nums, 1, ())
+    parts: list[tuple[int, int | str]] = []
+    for part in re.split(r"[.\-]", pre):
+        parts.append((0, int(part)) if part.isdigit() else (1, part))
+    return (nums, 0, tuple(parts))
+
+
+def _pick_loader_version(versions: list[str]) -> str:
+    """Newest loader; prefer a non-prerelease when any exist.
+
+    Quilt's per-game meta endpoint is not sorted (often returns ancient betas
+    first), so callers must not use versions[0] blindly.
+    """
+    releases = [v for v in versions if "-" not in v]
+    pool = releases or versions
+    return max(pool, key=_loader_version_key)
 
 VERSION_MANIFEST_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 FABRIC_META_BASE = "https://meta.fabricmc.net/v2"
@@ -100,7 +125,45 @@ def resolve_version_json(version_id: str, version_url: str | None = None) -> dic
     Fabric/Quilt profiles only ship loader libraries and a couple of JVM args;
     the vanilla parent supplies -cp, natives paths, game args, and client libs.
     """
-    return _merge_inherited(get_version_json(version_id, version_url))
+    return _ensure_quilt_official_mappings(_merge_inherited(get_version_json(version_id, version_url)))
+
+
+QUILT_OFFICIAL_MAPPINGS_ARG = (
+    "-Dloader.experimental.minecraft.targetNamespace=official"
+)
+
+
+def _has_mapping_library(vjson: dict) -> bool:
+    for lib in vjson.get("libraries", []):
+        name = lib.get("name", "")
+        if ":intermediary:" in name or name.startswith("org.quiltmc:hashed:"):
+            return True
+    return False
+
+
+def _ensure_quilt_official_mappings(vjson: dict) -> dict:
+    """MC 26+ ships without intermediary; Quilt needs an explicit official namespace.
+
+    Quilt meta omits intermediary/hashed for those versions. Without this JVM
+    flag, Knot crashes looking for the intermediary namespace.
+    """
+    main = vjson.get("mainClass", "")
+    if "quiltmc.loader" not in main or _has_mapping_library(vjson):
+        return vjson
+
+    args = dict(vjson.get("arguments") or {})
+    jvm = list(args.get("jvm", []))
+    if not any(
+        isinstance(a, str) and "loader.experimental.minecraft.targetNamespace" in a
+        for a in jvm
+    ):
+        jvm.append(QUILT_OFFICIAL_MAPPINGS_ARG)
+    args["jvm"] = jvm
+    if "game" not in args:
+        args["game"] = list((vjson.get("arguments") or {}).get("game", []))
+    out = dict(vjson)
+    out["arguments"] = args
+    return out
 
 
 def _merge_inherited(vjson: dict) -> dict:
@@ -352,13 +415,15 @@ def full_install(
 def fetch_fabric_loader_versions(mc_version: str) -> list[str]:
     resp = requests.get(f"{FABRIC_META_BASE}/versions/loader/{mc_version}", timeout=30)
     resp.raise_for_status()
-    return [entry["loader"]["version"] for entry in resp.json()]
+    versions = [entry["loader"]["version"] for entry in resp.json()]
+    return sorted(versions, key=_loader_version_key, reverse=True)
 
 
 def fetch_quilt_loader_versions(mc_version: str) -> list[str]:
     resp = requests.get(f"{QUILT_META_BASE}/versions/loader/{mc_version}", timeout=30)
     resp.raise_for_status()
-    return [entry["loader"]["version"] for entry in resp.json()]
+    versions = [entry["loader"]["version"] for entry in resp.json()]
+    return sorted(versions, key=_loader_version_key, reverse=True)
 
 
 def install_fabric(
@@ -368,7 +433,7 @@ def install_fabric(
         versions = fetch_fabric_loader_versions(mc_version)
         if not versions:
             raise ValueError(f"No Fabric loader available for {mc_version}")
-        loader_version = versions[0]
+        loader_version = _pick_loader_version(versions)
 
     profile_id = f"fabric-loader-{loader_version}-{mc_version}"
     ver_dir = config.VERSIONS_DIR / profile_id
@@ -406,7 +471,7 @@ def install_quilt(
         versions = fetch_quilt_loader_versions(mc_version)
         if not versions:
             raise ValueError(f"No Quilt loader available for {mc_version}")
-        loader_version = versions[0]
+        loader_version = _pick_loader_version(versions)
 
     profile_id = f"quilt-loader-{loader_version}-{mc_version}"
     ver_dir = config.VERSIONS_DIR / profile_id

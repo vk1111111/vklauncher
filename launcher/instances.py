@@ -22,6 +22,9 @@ INSTANCE_SUBDIRS = [
     "crash-reports",
 ]
 
+# Legacy keys that used to live in instances.json; migrated to settings.json.
+_SETTINGS_KEYS = ("min_ram_mb", "max_ram_mb", "java_path")
+
 
 @dataclass
 class Instance:
@@ -32,9 +35,6 @@ class Instance:
     version_profile_id: str = ""
     created: float = field(default_factory=time.time)
     last_played: float = 0.0
-    min_ram_mb: Optional[int] = None
-    max_ram_mb: Optional[int] = None
-    java_path: str = ""
     modpack_source: str = ""
 
     @property
@@ -45,28 +45,78 @@ class Instance:
     def minecraft_dir(self) -> Path:
         return self.dir / ".minecraft"
 
+    @property
+    def settings_path(self) -> Path:
+        return self.dir / "settings.json"
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 def _load_all() -> dict[str, dict]:
-    return config.load_json(config.INSTANCES_FILE, {})
+    data = config.load_json(config.INSTANCES_FILE, {})
+    changed = False
+    for name, entry in list(data.items()):
+        if _migrate_legacy_settings(name, entry):
+            changed = True
+    if changed:
+        _save_all(data)
+    return data
 
 
 def _save_all(data: dict[str, dict]) -> None:
     config.save_json(config.INSTANCES_FILE, data)
 
 
+def _migrate_legacy_settings(name: str, entry: dict[str, Any]) -> bool:
+    """Move settings fields from instances.json into instances/<name>/settings.json."""
+    if not any(k in entry for k in _SETTINGS_KEYS):
+        return False
+
+    inst_dir = config.INSTANCES_DIR / name
+    settings_path = inst_dir / "settings.json"
+    settings = config.default_instance_settings()
+    if settings_path.exists():
+        settings.update(config.load_json(settings_path, {}))
+
+    for key in _SETTINGS_KEYS:
+        if key in entry:
+            settings[key] = entry.pop(key)
+
+    inst_dir.mkdir(parents=True, exist_ok=True)
+    config.save_json(settings_path, settings)
+    return True
+
+
+def _instance_from_entry(entry: dict[str, Any]) -> Instance:
+    clean = {k: v for k, v in entry.items() if k not in _SETTINGS_KEYS}
+    return Instance(**clean)
+
+
+def load_instance_settings(inst: Instance) -> dict[str, Any]:
+    settings = config.default_instance_settings()
+    settings.update(config.load_json(inst.settings_path, {}))
+    return settings
+
+
+def save_instance_settings(inst: Instance, settings: dict[str, Any]) -> None:
+    merged = config.default_instance_settings()
+    merged.update(settings)
+    # Only persist known instance settings keys.
+    out = {key: merged.get(key) for key in config.default_instance_settings()}
+    config.save_json(inst.settings_path, out)
+
+
 def list_instances() -> list[Instance]:
     data = _load_all()
-    return [Instance(**v) for v in data.values()]
+    return [_instance_from_entry(v) for v in data.values()]
 
 
 def get_instance(name: str) -> Optional[Instance]:
     data = _load_all()
     if name not in data:
         return None
-    return Instance(**data[name])
+    return _instance_from_entry(data[name])
 
 
 def validate_name(name: str) -> None:
@@ -100,6 +150,7 @@ def create_instance(
     for sub in INSTANCE_SUBDIRS:
         (inst.minecraft_dir / sub).mkdir(parents=True, exist_ok=True)
 
+    save_instance_settings(inst, config.default_instance_settings())
     data[name] = inst.to_dict()
     _save_all(data)
     return inst
@@ -142,7 +193,7 @@ def rename_instance(old_name: str, new_name: str) -> Instance:
     entry["name"] = new_name
     data[new_name] = entry
     _save_all(data)
-    return Instance(**entry)
+    return _instance_from_entry(entry)
 
 
 def duplicate_instance(src_name: str, new_name: str) -> Instance:
@@ -160,4 +211,4 @@ def duplicate_instance(src_name: str, new_name: str) -> Instance:
     entry["last_played"] = 0.0
     data[new_name] = entry
     _save_all(data)
-    return Instance(**entry)
+    return _instance_from_entry(entry)

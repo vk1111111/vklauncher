@@ -331,10 +331,14 @@ class InstanceSettingsModal(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         settings = config.load_settings()
-        default_min = settings.get("min_ram_mb", 1024)
-        default_max = settings.get("max_ram_mb", 4096)
-        min_val = "" if self.inst.min_ram_mb is None else str(self.inst.min_ram_mb)
-        max_val = "" if self.inst.max_ram_mb is None else str(self.inst.max_ram_mb)
+        defaults = config.default_launcher_settings()
+        default_min = settings.get("min_ram_mb", defaults.get("min_ram_mb", 1024))
+        default_max = settings.get("max_ram_mb", defaults.get("max_ram_mb", 4096))
+        inst_settings = instances.load_instance_settings(self.inst)
+        min_raw = inst_settings.get("min_ram_mb")
+        max_raw = inst_settings.get("max_ram_mb")
+        min_val = "" if min_raw is None else str(min_raw)
+        max_val = "" if max_raw is None else str(max_raw)
         with Vertical(classes="panel", id="instance-settings-box"):
             yield Static(f"[bold]Instance settings - {safe_markup(self.inst.name)}[/]")
             yield Label(f"Min RAM (MB) - leave blank to use default ({default_min})")
@@ -375,17 +379,23 @@ class InstanceSettingsModal(ModalScreen[bool]):
             return
 
         settings = config.load_settings()
-        effective_min = min_ram if min_ram is not None else settings.get("min_ram_mb", 1024)
-        effective_max = max_ram if max_ram is not None else settings.get("max_ram_mb", 4096)
+        defaults = config.default_launcher_settings()
+        effective_min = (
+            min_ram if min_ram is not None else settings.get("min_ram_mb", defaults.get("min_ram_mb", 1024))
+        )
+        effective_max = (
+            max_ram if max_ram is not None else settings.get("max_ram_mb", defaults.get("max_ram_mb", 4096))
+        )
         if effective_min > effective_max:
             self.app.push_screen(
                 MessageModal("Error", "Min RAM cannot be greater than max RAM.", is_error=True)
             )
             return
 
-        self.inst.min_ram_mb = min_ram
-        self.inst.max_ram_mb = max_ram
-        instances.save_instance(self.inst)
+        inst_settings = instances.load_instance_settings(self.inst)
+        inst_settings["min_ram_mb"] = min_ram
+        inst_settings["max_ram_mb"] = max_ram
+        instances.save_instance_settings(self.inst, inst_settings)
         self.dismiss(True)
 
 
@@ -803,11 +813,17 @@ class MainScreen(Screen):
         else:
             source = "local"
 
-        min_ram = inst.min_ram_mb if inst.min_ram_mb is not None else settings.get("min_ram_mb", 1024)
-        max_ram = inst.max_ram_mb if inst.max_ram_mb is not None else settings.get("max_ram_mb", 4096)
-        jdk = inst.java_path or config.find_java() or "auto"
-        min_note = "" if inst.min_ram_mb is not None else " (default)"
-        max_note = "" if inst.max_ram_mb is not None else " (default)"
+        inst_settings = instances.load_instance_settings(inst)
+        defaults = config.default_launcher_settings()
+        min_ram = inst_settings.get("min_ram_mb")
+        if min_ram is None:
+            min_ram = settings.get("min_ram_mb", defaults.get("min_ram_mb", 1024))
+        max_ram = inst_settings.get("max_ram_mb")
+        if max_ram is None:
+            max_ram = settings.get("max_ram_mb", defaults.get("max_ram_mb", 4096))
+        jdk = config.find_java(inst_settings.get("java_path") or None) or "auto"
+        min_note = "" if inst_settings.get("min_ram_mb") is not None else " (default)"
+        max_note = "" if inst_settings.get("max_ram_mb") is not None else " (default)"
 
         self.query_one("#detail-type", Static).update(f"Instance Type: {safe_markup(inst_type)}")
         self.query_one("#detail-source", Static).update(f"Source: {safe_markup(source)}")
@@ -853,6 +869,20 @@ class MainScreen(Screen):
 
     def action_settings(self) -> None:
         self.app.push_screen(SettingsScreen())
+
+    def action_browse_files(self) -> None:
+        inst = self._selected_instance()
+        if not inst:
+            self.app.push_screen(
+                MessageModal("No instance", "Select an instance first.", is_error=True)
+            )
+            return
+        try:
+            config.open_directory(inst.minecraft_dir)
+        except Exception as e:  # noqa: BLE001
+            self.app.push_screen(
+                MessageModal("Could not open folder", str(e), is_error=True)
+            )
 
     def action_delete_instance(self) -> None:
         inst = self._selected_instance()

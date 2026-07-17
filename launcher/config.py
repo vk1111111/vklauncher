@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
-import sys
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,10 @@ def _default_app_dir() -> Path:
     return Path(base) / "vklauncher"
 
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+DEFAULT_SETTINGS_FILE = PACKAGE_DIR / "default_settings.json"
+DEFAULT_INSTANCE_SETTINGS_FILE = PACKAGE_DIR / "default_instance_settings.json"
+
 APP_DIR = Path(os.environ.get("MC_TUI_LAUNCHER_HOME", _default_app_dir()))
 SHARED_DIR = APP_DIR / "shared"
 VERSIONS_DIR = SHARED_DIR / "versions"
@@ -33,18 +37,6 @@ INSTANCES_DIR = APP_DIR / "instances"
 SETTINGS_FILE = APP_DIR / "settings.json"
 ACCOUNTS_FILE = APP_DIR / "accounts.json"
 INSTANCES_FILE = APP_DIR / "instances.json"
-
-DEFAULT_SETTINGS: dict[str, Any] = {
-    # memalloc default
-    "min_ram_mb": 1024,
-    "max_ram_mb": 4096,
-    "java_path": "",
-    "extra_jvm_args": "",
-    # oauth
-    "ms_client_id": "",
-    "window_width": 925,
-    "window_height": 530,
-}
 
 
 def ensure_dirs() -> None:
@@ -79,8 +71,17 @@ def save_json(path: Path, data: Any) -> None:
     tmp.replace(path)
 
 
+def default_launcher_settings() -> dict[str, Any]:
+    return load_json(DEFAULT_SETTINGS_FILE, {})
+
+
+def default_instance_settings() -> dict[str, Any]:
+    return load_json(DEFAULT_INSTANCE_SETTINGS_FILE, {})
+
+
 def load_settings() -> dict[str, Any]:
-    settings = dict(DEFAULT_SETTINGS)
+    """Launcher settings: packaged defaults merged with user settings.json."""
+    settings = default_launcher_settings()
     settings.update(load_json(SETTINGS_FILE, {}))
     return settings
 
@@ -115,7 +116,23 @@ def is_macos() -> bool:
     return platform.system() == "Darwin"
 
 
-def find_java() -> str:
+def open_directory(path: Path) -> None:
+    """Open a directory in the system file manager."""
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    target = str(path)
+    if is_windows():
+        os.startfile(target)  # type: ignore[attr-defined]
+    elif is_macos():
+        subprocess.Popen(["open", target], start_new_session=True)
+    else:
+        subprocess.Popen(["xdg-open", target], start_new_session=True)
+
+
+def find_java(java_path: str | None = None) -> str:
+    if java_path:
+        return java_path
+
     settings = load_settings()
     if settings.get("java_path"):
         return settings["java_path"]

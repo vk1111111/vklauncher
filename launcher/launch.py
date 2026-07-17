@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from . import config, versions
+from . import config, instances, versions
 from .auth import Account
 from .instances import Instance
 
@@ -108,16 +107,14 @@ def build_command(
 
     asset_index_id = version_json.get("assets") or version_json.get("assetIndex", {}).get("id", "legacy")
 
-    min_ram = (
-        instance.min_ram_mb
-        if instance.min_ram_mb is not None
-        else settings.get("min_ram_mb", 1024)
-    )
-    max_ram = (
-        instance.max_ram_mb
-        if instance.max_ram_mb is not None
-        else settings.get("max_ram_mb", 4096)
-    )
+    inst_settings = instances.load_instance_settings(instance)
+    defaults = config.default_launcher_settings()
+    min_ram = inst_settings.get("min_ram_mb")
+    if min_ram is None:
+        min_ram = settings.get("min_ram_mb", defaults.get("min_ram_mb", 1024))
+    max_ram = inst_settings.get("max_ram_mb")
+    if max_ram is None:
+        max_ram = settings.get("max_ram_mb", defaults.get("max_ram_mb", 4096))
 
     subs = {
         "auth_player_name": account.username,
@@ -139,7 +136,7 @@ def build_command(
         "classpath_separator": classpath_sep,
     }
 
-    java_path = instance.java_path or config.find_java()
+    java_path = config.find_java(inst_settings.get("java_path") or None)
     cmd: list[str] = [java_path]
 
     args_block = version_json.get("arguments")
