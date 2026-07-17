@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=vklauncher
+GenericName=Minecraft Launcher
+Comment=Terminal UI Minecraft Java launcher
+Exec=@EXEC@
+Icon=vklauncher
+Terminal=true
+Categories=Game;PackageManager;
+Keywords=minecraft;launcher;fabric;quilt;
+StartupNotify=false

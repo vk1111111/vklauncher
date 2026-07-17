@@ -40,7 +40,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install -U pip
-          python -m pip install -r requirements.txt pyinstaller
+          python -m pip install -r requirements.txt pyinstaller pillow
 
       - name: Build binary
         run: python build_binary.py
@@ -57,13 +57,34 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
+      - name: Stage release assets
+        run: |
+          mkdir -p release-assets
+          cp artifacts/*.zip release-assets/
+          cp install.sh uninstall.sh install.ps1 uninstall.ps1 release-assets/
+          chmod +x release-assets/install.sh release-assets/uninstall.sh
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.zip
+          files: release-assets/*
           generate_release_notes: true
+          body: |
+            ## Install
+
+            **Linux / macOS**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/vk1111111/vklauncher/main/install.sh | bash
+            ```
+
+            **Windows (PowerShell)**
+            ```powershell
+            irm https://raw.githubusercontent.com/vk1111111/vklauncher/main/install.ps1 | iex
+            ```

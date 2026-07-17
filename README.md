@@ -1,4 +1,4 @@
-# vklauncher
+![vklauncher](assets/banner.png)
 
 A terminal UI Minecraft Java launcher for macOS, Windows and Linux.
 
@@ -10,15 +10,46 @@ A terminal UI Minecraft Java launcher for macOS, Windows and Linux.
   instance with automatic mod-loader installation.
 - Support for offline accounts and full Microsoft account sign-in.
 
+## Install (recommended)
+
+Download the latest release binary and register a Start Menu / Applications /
+desktop launcher entry:
+
+**Linux / macOS**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vk1111111/vklauncher/main/install.sh | bash
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/vk1111111/vklauncher/main/install.ps1 | iex
+```
+
+Pin a release with `VKLAUNCHER_VERSION=v0.1.0` (or `$env:VKLAUNCHER_VERSION` on Windows).
+
+Uninstall:
+
+```bash
+# Linux / macOS
+curl -fsSL https://raw.githubusercontent.com/vk1111111/vklauncher/main/uninstall.sh | bash
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/vk1111111/vklauncher/main/uninstall.ps1 | iex
+```
+
 ## Requirements
 
-- Python 3.10+
 - A Java runtime installed (the launcher tries to auto-detect it via
   `JAVA_HOME` / `PATH`; you can also set an explicit path in Settings).
-  Modern Minecraft (1.20.5+) needs Java 21, 1.17-1.20.4 needs Java 17,
-  older versions need Java 8 so install whichever your target version needs.
+  Modern Minecraft (1.20.5+) needs Java 21, 1.17–1.20.4 needs Java 17,
+  older versions need Java 8 — install whichever your target version needs.
+- For development from source: Python 3.10+
 
-## Install & run
+## Run from source
 
 ```bash
 python3 -m venv .venv
@@ -27,19 +58,18 @@ pip install -r requirements.txt
 python3 main.py
 ```
 
-## Standalone binaries
-
-Build a one-file binary for your current OS:
+## Build standalone binaries
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt pyinstaller
+pip install -r requirements.txt pyinstaller pillow
 python3 build_binary.py
 ```
 
 The binary and a zip land in `dist/` (for example
-`dist/vklauncher-linux-x86_64/vklauncher`).
+`dist/vklauncher-linux-x86_64/vklauncher`), including icons used by the
+installers.
 
 Windows, macOS, and Linux builds are also produced by GitHub Actions
 (`.github/workflows/build-binaries.yml`) on version tags (`v*`) or via
@@ -65,6 +95,6 @@ Every screen shows its own keybindings at the bottom; `esc` goes back.
 ## Known limitations
 
 - No support for Forge/NeoForge
-- No built-in Java installer you need JDK already on your system.
+- No built-in Java installer — you need a JDK already on your system.
 - Resource/texture pack and shader browsing from Modrinth isn't built in
   (only modpacks)

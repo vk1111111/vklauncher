@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for vklauncher (onefile binary)."""
 
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_data_files
@@ -38,6 +38,10 @@ tmp_ret = collect_all("textual")
 datas += tmp_ret[0]
 binaries += tmp_ret[1]
 hiddenimports += tmp_ret[2]
+
+icon_path = os.environ.get("VKLAUNCHER_ICON_ICO") or os.environ.get("VKLAUNCHER_ICON_ICNS") or None
+if icon_path and not Path(icon_path).exists():
+    icon_path = None
 
 a = Analysis(
     [str(root / "main.py")],
@@ -77,4 +81,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=icon_path,
 )
