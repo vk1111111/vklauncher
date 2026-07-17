@@ -12,8 +12,7 @@ A terminal UI Minecraft Java launcher for macOS, Windows and Linux.
 
 ## Install (recommended)
 
-Download the latest release binary and register a Start Menu / Applications /
-desktop launcher entry:
+Download the latest release binary
 
 **Linux / macOS**
 
@@ -64,14 +63,6 @@ source .venv/bin/activate
 pip install -r requirements.txt pyinstaller pillow
 python3 build_binary.py
 ```
-
-The binary and a zip land in `dist/` (for example
-`dist/vklauncher-linux-x86_64/vklauncher`), including icons used by the
-installers.
-
-Windows, macOS, and Linux builds are also produced by GitHub Actions
-(`.github/workflows/build-binaries.yml`) on version tags (`v*`) or via
-**Actions → Build binaries → Run workflow**.
 
 ## Keybindings (main screen)
 
