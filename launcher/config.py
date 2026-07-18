@@ -16,17 +16,11 @@ def _default_app_dir() -> Path:
         return Path(base) / "vklauncher"
     if system == "Darwin":
         return Path.home() / "Library" / "Application Support" / "vklauncher"
-    # Linux / other unix
     base = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
     return Path(base) / "vklauncher"
 
 
 def _package_dir() -> Path:
-    """Directory containing packaged data (JSON defaults).
-
-    PyInstaller onefile extracts to sys._MEIPASS; datas are placed under
-    ``launcher/`` there. In a normal install, files live next to this module.
-    """
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         bundled = Path(meipass) / "launcher"
@@ -96,7 +90,6 @@ def default_instance_settings() -> dict[str, Any]:
 
 
 def load_settings() -> dict[str, Any]:
-    """Launcher settings: packaged defaults merged with user settings.json."""
     settings = default_launcher_settings()
     settings.update(load_json(SETTINGS_FILE, {}))
     return settings
@@ -132,13 +125,47 @@ def is_macos() -> bool:
     return platform.system() == "Darwin"
 
 
+def prepare_windows_child_process() -> None:
+    if not is_windows():
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.kernel32.SetDllDirectoryW(None)
+    except Exception:
+        pass
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not meipass:
+        return
+    meipass = os.path.normcase(os.path.abspath(str(meipass)))
+    parts = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry:
+            continue
+        normalized = os.path.normcase(os.path.abspath(entry))
+        if normalized == meipass or normalized.startswith(meipass + os.sep):
+            continue
+        parts.append(entry)
+    os.environ["PATH"] = os.pathsep.join(parts)
+
+
 def open_directory(path: Path) -> None:
-    """Open a directory in the system file manager."""
-    path = Path(path)
+    path = Path(path).resolve()
     path.mkdir(parents=True, exist_ok=True)
     target = str(path)
     if is_windows():
-        os.startfile(target)  # type: ignore[attr-defined]
+        prepare_windows_child_process()
+        try:
+            import ctypes
+
+            rc = ctypes.windll.shell32.ShellExecuteW(
+                None, "explore", target, None, None, 1
+            )
+            if rc <= 32:
+                raise OSError(f"ShellExecute failed with code {rc}")
+        except Exception:
+            subprocess.Popen(["explorer", target], close_fds=True)
     elif is_macos():
         subprocess.Popen(["open", target], start_new_session=True)
     else:

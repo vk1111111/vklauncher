@@ -64,6 +64,30 @@ Button {
     height: 3;
     margin-bottom: 1;
 }
+#progress-box {
+    max-width: 100%;
+    max-height: 100%;
+}
+#progress-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+#progress-label {
+    height: 1;
+    margin-bottom: 1;
+    color: $text-muted;
+}
+#progress-bar {
+    height: 1;
+    margin-bottom: 1;
+}
+#progress-log {
+    height: 1fr;
+    min-height: 8;
+    border: solid $primary 50%;
+    padding: 0 1;
+    scrollbar-size-vertical: 1;
+}
 """
 
 
@@ -80,13 +104,18 @@ class ProgressModal(ModalScreen[None]):
     def __init__(self, title: str):
         super().__init__()
         self._title = title
+        self._last_label: str | None = None
+        self._last_logged_done: int = -1
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel", id="progress-box"):
             yield Static(self._title, id="progress-title")
             yield Static("Starting...", id="progress-label")
             yield ProgressBar(total=100, id="progress-bar", show_eta=False)
-            yield Log(id="progress-log", max_lines=200)
+            yield Log(id="progress-log", max_lines=400)
+
+    def on_mount(self) -> None:
+        self.log_line(f"Starting: {self._title}")
 
     def action_noop(self) -> None:
         pass
@@ -96,6 +125,16 @@ class ProgressModal(ModalScreen[None]):
             bar = self.query_one("#progress-bar", ProgressBar)
             bar.update(total=max(total, 1), progress=done)
             self.query_one("#progress-label", Static).update(f"{label}  ({done}/{total})")
+
+            if label != self._last_label:
+                self._last_label = label
+                self._last_logged_done = -1
+                self.log_line(f"— {label}")
+
+            step = 1 if total <= 30 else max(1, total // 25)
+            if done == total or done - self._last_logged_done >= step:
+                self._last_logged_done = done
+                self.log_line(f"  {done}/{total}")
         except Exception:
             pass
 

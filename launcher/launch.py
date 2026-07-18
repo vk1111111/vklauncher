@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -85,6 +86,43 @@ def _natives_dir(instance: Instance, version_json: dict) -> Path:
     return candidates[0]
 
 
+def _wrap_manifest_header(name: str, value: str) -> str:
+    prefix = f"{name}: "
+    first_budget = 72 - len(prefix.encode("utf-8"))
+    value_bytes = value.encode("utf-8")
+    chunks: list[bytes] = []
+    if len(value_bytes) <= first_budget:
+        return prefix + value + "\n"
+    chunks.append(value_bytes[:first_budget])
+    rest = value_bytes[first_budget:]
+    while rest:
+        chunks.append(rest[:71])
+        rest = rest[71:]
+    lines = [prefix + chunks[0].decode("utf-8")]
+    lines.extend(" " + c.decode("utf-8") for c in chunks[1:])
+    return "\n".join(lines) + "\n"
+
+
+def _write_classpath_jar(jars: list[str], dest: Path) -> Path:
+    entries = [Path(j).resolve().as_uri() for j in jars]
+    manifest = "Manifest-Version: 1.0\n" + _wrap_manifest_header(
+        "Class-Path", " ".join(entries)
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(dest, "w") as zf:
+        zf.writestr("META-INF/MANIFEST.MF", manifest)
+    return dest
+
+
+def _classpath_for_command(instance: Instance, jars: list[str]) -> str:
+    classpath_sep = ";" if config.is_windows() else ":"
+    if not config.is_windows():
+        return classpath_sep.join(jars)
+    cp_jar = instance.dir / "classpath.jar"
+    _write_classpath_jar(jars, cp_jar)
+    return str(cp_jar)
+
+
 def build_command(
     instance: Instance,
     version_json: dict,
@@ -103,7 +141,7 @@ def build_command(
     classpath.append(str(_client_jar_path(instance, version_json)))
 
     classpath_sep = ";" if config.is_windows() else ":"
-    classpath_str = classpath_sep.join(classpath)
+    classpath_str = _classpath_for_command(instance, classpath)
 
     asset_index_id = version_json.get("assets") or version_json.get("assetIndex", {}).get("id", "legacy")
 
@@ -177,6 +215,9 @@ def launch(
 
     instance.minecraft_dir.mkdir(parents=True, exist_ok=True)
 
+    config.prepare_windows_child_process()
+    env = {**os.environ}
+
     proc = subprocess.Popen(
         cmd,
         cwd=str(instance.minecraft_dir),
@@ -184,7 +225,7 @@ def launch(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
-        env={**os.environ},
+        env=env,
     )
     return proc
 
